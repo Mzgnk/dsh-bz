@@ -24,11 +24,14 @@
 ## 安装
 
 ```bash
-# 本地开发版
-dsh plugin --profile web add "file:///C:/Customization/DeepseekHarness/dsh-bz"
+# 从 GitHub 装（推荐）
+dsh plugin --profile desktop add "github:Mzgnk/dsh-bz"
 
-# 若发布到 npm
-dsh plugin --profile web add dsh-bz
+# 本地开发版（改了源码即时生效，需重新 add）
+dsh plugin --profile desktop add "file:///C:/Customization/DeepseekHarness/dsh-bz"
+
+# 从 npm（若已发布）
+dsh plugin --profile desktop add dsh-bz
 ```
 
 装完重启 DSH Web 生效。

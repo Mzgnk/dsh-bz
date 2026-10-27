@@ -1,0 +1,14 @@
+# 依赖与构建产物（本项目零依赖，但保险起见）
+node_modules/
+*.log
+*.tmp
+
+# 编辑器/系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 本地调试（⛔ 别把临时验证脚本提交进去）
+_*.mjs
+_*.ps1

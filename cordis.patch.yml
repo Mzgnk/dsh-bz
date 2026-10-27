@@ -1,0 +1,8 @@
+# dsh-bz bundle patch: inserts this plugin into a profile's layer stack.
+# ⛔ 零补丁原则 —— 只 insert 自己的插件行，⛔ 不改宿主任何配置。
+- insert:
+    - id: bz-rules
+      name: 'dsh-bz'
+      config:
+        refreshAfterSteps: 20
+        maxBytes: 8192

@@ -15,6 +15,9 @@ process.env.DSH_HOME = tmp;
 const { collect, render, fingerprint, splitRules, escapeReminder, globalRulesPath, projectRulesPath, sessionRulesPath } =
   await import('../lib/rules.js');
 const { addSessionRule, clearSession, loadSession, isPaused, setPaused } = await import('../lib/store.js');
+const { sessionIdOf, cwdOf } = await import('../lib/session.js');
+const { detectConflicts } = await import('../lib/command.js');
+const { __internal } = await import('../lib/index.js');
 
 let pass = 0;
 let fail = 0;
@@ -80,6 +83,40 @@ console.log('\n【七】坏输入不崩');
 fs.writeFileSync(sessionRulesPath('bad'), '{ 这不是 JSON', 'utf8');
 t('坏 JSON 当没有，不抛', collect({ cwd, sessionId: 'bad' }).session.length === 0);
 t('文件不存在返回空', collect({ cwd, sessionId: 'nope' }).session.length === 0);
+
+console.log('\n【八】会话上下文解析（注入侧与命令侧必须同源）');
+// 修复前：index.js 读 agent.session.id，command.js 读 invocation.sessionId，
+// 两套逻辑各自猜 ⇒ /bz add 可能写进 unknown.json 而注入侧读不到（规则加了不生效）。
+const fakeAgent = { session: { id: 'sess-9' }, workingDirectory: cwd };
+const fakeInvocation = { sessionId: 'sess-9', cwd };
+t('agent 形状可解析', sessionIdOf(fakeAgent) === 'sess-9');
+t('invocation 形状可解析', sessionIdOf(fakeInvocation) === 'sess-9');
+t('两侧解析结果一致（关键：不再分叉）', sessionIdOf(fakeAgent) === sessionIdOf(fakeInvocation));
+t('cwd 两侧一致', cwdOf(fakeAgent) === cwdOf(fakeInvocation));
+t('未知形状回落 unknown', sessionIdOf({}) === 'unknown');
+t('空值不抛', sessionIdOf(null) === 'unknown' && cwdOf(undefined).length > 0);
+
+console.log('\n【九】冲突检测不误报');
+t('must not 不算自相矛盾', detectConflicts(['You must not skip tests']).length === 0);
+t('中文正常规则不误报', detectConflicts(['必须先读文件']).length === 0);
+t('真矛盾能检出', detectConflicts(['必须做完但禁止提交']).length === 1);
+
+console.log('\n【十】项目规则来源标注（提示注入可识别）');
+const withProject = render(collect({ cwd, sessionId: 'sess-1' }), 8192);
+t('有项目规则时标注来源', !!withProject && withProject.includes('project.md'));
+fs.rmSync(projectRulesPath(cwd), { force: true });
+const noProject = render({ global: ['g'], project: [], session: [], all: ['g'] }, 8192);
+t('无项目规则时不打标注', !!noProject && !noProject.includes('project.md'));
+
+console.log('\n【十一】路径显示与来源校验');
+t('$DSH_HOME 内正常缩略', __internal.displayPath(path.join(tmp, 'bz-rules', 'global.md')).startsWith('$DSH_HOME'));
+t('同前缀不同目录不被误缩略', !__internal.displayPath(path.join(tmp + '2', 'x.md')).startsWith('$DSH_HOME'));
+const mkReq = (h) => ({ headers: { get: (k) => h[k.toLowerCase()] ?? null } });
+t('无 Origin 放行（非浏览器）', __internal.originAllowed(mkReq({})) === true);
+t('localhost 放行', __internal.originAllowed(mkReq({ origin: 'http://localhost:3000' })) === true);
+t('内网 IP 放行', __internal.originAllowed(mkReq({ origin: 'http://192.168.1.5:8080' })) === true);
+t('公网跨站拒绝', __internal.originAllowed(mkReq({ origin: 'https://evil.example.com' })) === false);
+t('Origin 与 Host 同源放行', __internal.originAllowed(mkReq({ origin: 'https://dsh.example.com', host: 'dsh.example.com' })) === true);
 
 // 清理
 try {

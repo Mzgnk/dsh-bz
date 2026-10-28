@@ -1,0 +1,4 @@
+# 统一换行符：避免 Windows 上 clone 后整个仓库显示为已修改
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

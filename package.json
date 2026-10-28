@@ -1,10 +1,18 @@
 {
   "name": "dsh-bz",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-dependency rule injector for DeepSeek Harness: three-scope rules (global/project/session) published as system-reminder at conversation start, with loop-breaker, dedupe, session persistence, /bz commands, and a settings-panel editor.",
   "type": "module",
   "main": "lib/index.js",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mzgnk/dsh-bz.git"
+  },
+  "homepage": "https://github.com/Mzgnk/dsh-bz#readme",
+  "bugs": {
+    "url": "https://github.com/Mzgnk/dsh-bz/issues"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -18,6 +26,7 @@
   },
   "files": [
     "lib",
+    "test",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"

@@ -3,20 +3,23 @@
 > 把「必须做 / 禁止做」这类约束**在会话生命周期里反复注入**，
 > 而不是只在第一条消息说一次（后者在长对话、`/compact`、`/resume` 之后就丢了）。
 
-## 为什么造这个（不是重复造轮子）
+> ⚠️ **本项目是个人开源的第三方插件，与 DeepSeek Harness 官方无关，未获官方背书。**
+> 它会把本地文件内容注入到你的对话上下文里 —— 使用前请务必读一遍[安全](#安全)章节。
 
-`dsh-baize-rules`（白泽）功能对，但：
+## 设计取舍
 
-| 问题 | 后果 |
+同类方案（带完整面板的规则插件）功能更全，代价是依赖链与版本对齐：
+
+| 常见问题 | 后果 |
 |---|---|
-| `peerDependencies` 写死 `^0.1.1-rc.2` | DSH `0.2.1-rc.3` 装不上，要 `--accept-risk` **绕过崩溃保护** |
-| 三级作用域 + 优先级合并 + 面板 UI | 代码 90KB+，改一处要重新编译 |
-| 依赖 `dsh-fs` / `dsh-host-webserver` / `dsh-client-ui-slots` | 每个都要版本对齐，升级一次全断 |
+| 声明写死区间的 `peerDependencies` | 宿主一升级就装不上，要 `--accept-risk` **绕过崩溃保护** |
+| 依赖宿主的 fs / webserver / ui-slots 包 | 每个都要版本对齐，升级一次全断 |
+| 三级作用域 + 优先级合并 + 大型面板 | 代码量大，改一处要重新编译 |
 
 **dsh-bz 的取舍**：只保留核心 —— **读文件 → 拼字符串 → 挂 `agent/pre-step` 钩子**。
 - **零外部依赖**：只用 `node:fs` / `node:path` / `node:os` / `node:crypto`
 - **零补丁**：⛔ 不改宿主 `resources/app` 任何文件，只 `insert` 自己的插件行
-- **版本对齐**：`peerDependencies: ^0.2.1-rc.3`，⛔ 不需要 `--accept-risk`
+- **不声明 `peerDependencies`**：宿主跑在 `app.asar` 内、并非 npm 依赖，社区插件的实际惯例是一个都不声明。本项目同样不声明 ⇒ 不会被版本区间校验拦住，⛔ 不需要 `--accept-risk`
 - **纯 ESM JS**：⛔ 不用 TS 编译，改一行即时生效
 - **全链路 try-catch**：任何一层坏掉只丢注入，⛔ 不让主程序崩
 - **熔断**：`/bz pause` 写标记文件，**跨进程生效**（脚本也能触发）
@@ -28,7 +31,7 @@
 dsh plugin --profile desktop add "github:Mzgnk/dsh-bz"
 
 # 本地开发版（改了源码即时生效，需重新 add）
-dsh plugin --profile desktop add "file:///C:/Customization/DeepseekHarness/dsh-bz"
+dsh plugin --profile desktop add "file:///<你克隆到的目录>/dsh-bz"
 
 # 从 npm（若已发布）
 dsh plugin --profile desktop add dsh-bz
@@ -63,6 +66,20 @@ dsh plugin --profile desktop add dsh-bz
 | `/bz pause` | **熔断**：暂停注入（写 `bz-rules/PAUSED` 标记） |
 | `/bz resume` | 恢复注入 |
 
+## 面板（设置页）
+
+DSH Web 的 **设置 → bz 规则**（`client.js` 注入 `settings.section`），不用记指令也能操作：
+
+- 编辑并保存**全局层**规则（即 `$DSH_HOME/bz-rules/global.md`，跨项目生效）
+- 一键**暂停 / 恢复**注入，实时显示当前状态
+- 显示规则文件路径（`$DSH_HOME` 会自动缩略，不外泄机器绝对路径）
+- 文件不存在时提示「保存将创建它」
+- 中英双语（跟随界面语言）
+
+> 面板只能改**全局层**。项目层、会话层仍用文件或 `/bz add`（避免误改他人仓库里的规则）。
+>
+> 端点 `GET/POST /api/bz-rules` 自带 Origin 校验：只接受本机/内网或与请求 Host 同源的调用，跨站请求一律 403。
+
 ## 生命周期与去重
 
 - **注入时机**：`agent/pre-step`（每步之前判断）
@@ -91,31 +108,49 @@ dsh plugin --profile desktop add dsh-bz
 ## 安全
 
 - ⛔ 不改宿主任何文件
-- ⛔ 不联网
+- ⛔ 不联网（面板端点只与宿主同源通信）
 - 规则正文里的 `</system-reminder>` **自动转义**（防规则内容提前闭合标签）
 - 所有 IO **try-catch**：读不到文件、坏 JSON、权限不足 ⇒ 降级为"没有规则"，⛔ 不崩
 - **熔断**：`$DSH_HOME/bz-rules/PAUSED` 文件存在即全局暂停（脚本可 `touch` 它）
+- **面板端点自带来源校验**：跨站 Origin 直接 403，不只依赖宿主的围栏
+
+### ⚠️ 项目层规则是一个提示注入面，请自行判断来源
+
+**项目层规则读的是「当前工作目录里的文件」**：`<cwd>/.dsh/bz-rules/project.md`。
+
+也就是说 —— **任何人 clone 一个仓库，只要该仓库带了这份文件，打开该目录后它的内容就会被自动注入成「本会话必须遵守」的规则**，不需要你确认。如果这个仓库是别人给的，等于把「给 AI 下指令」的权力交给了对方（可诱导读文件、外发内容等）。
+
+防护建议：
+
+1. 打开来源不明的仓库前，先看一眼有没有 `.dsh/bz-rules/project.md`；
+2. 注入正文会**标注项目层规则读自该路径** —— 看到这行就说明有项目规则在生效；
+3. 想临时关掉：`/bz pause`（或 `touch $DSH_HOME/bz-rules/PAUSED`）全局停止注入；
+4. 只想要自己写的规则？放**全局层** `$DSH_HOME/bz-rules/global.md`，它不随仓库走。
+
+> 这是「把本地文件当指令读」这类工具的固有代价，不是本项目的实现缺陷 —— 但你必须知道它存在。
 
 ## 自测
 
 ```bash
-node test/self-check.mjs     # 23 条用例，不依赖宿主
+node test/self-check.mjs     # 41 条用例，不依赖宿主
 ```
 
-## 与白泽的对比
+覆盖：切条/转义、三级读取、预算裁切、去重指纹、会话持久化、熔断、坏输入降级、**会话字段解析一致性**、**冲突检测误报**、**来源标注**、**路径缩略与 Origin 校验**。
 
-| 维度 | 白泽 0.2.4 | dsh-bz 1.0.0 |
+## 与重型方案对比
+
+| 维度 | 重型方案（带全功能面板） | dsh-bz 1.0.1 |
 |---|---|---|
-| 装得上 0.2.1-rc.3 | ❌ 要 `--accept-risk` | ✅ 直接装 |
-| 外部依赖 | 13 个 peer | **0 个** |
-| 代码量 | 90KB+ | **~20KB** |
-| 面板 UI | 有 | ⛔ 无（用 `/bz status`） |
+| 装得上 0.2.1-rc.3 | ❌ 常见要 `--accept-risk` | ✅ 直接装 |
+| 外部依赖 | 十余个 peer | **0 个** |
+| 代码量 | 90KB+ | **~35KB**（含面板） |
+| 面板 UI | 有 | ✅ 有（设置页「bz 规则」） |
 | 会话持久化 | ✅ | ✅ |
-| 熔断 | ⛔ 无（要改配置） | ✅ `/bz pause` |
-| 冲突检测 | ⛔ 无 | ✅ `/bz check` |
+| 熔断 | 不一定有 | ✅ `/bz pause` |
+| 冲突检测 | 不一定有 | ✅ `/bz check` |
 | 去重 | SHA-1 | SHA-1 |
 
-**缺什么**：没有 Web 面板（白泽有）。用 `/bz status` 代替 —— 规则量不大时够用。
+**缺什么**：没有优先级合并（三级规则平铺展示，不做覆盖计算），也没有多规则集切换。规则量不大时不需要。
 
 ## License
 
